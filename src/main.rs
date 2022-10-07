@@ -2,7 +2,6 @@ use eframe::egui;
 use egui::ColorImage;
 use egui_extras::RetainedImage;
 
-
 mod ray;
 mod scene;
 mod vec3;
@@ -80,6 +79,7 @@ fn ray_color(ray: &Ray) -> Color {
 }
 
 fn gen_image(scene: &Scene) -> RetainedImage {
+    let start = std::time::Instant::now();
     let size = [scene.image_width, scene.image_height];
     let width = size[0];
     let height = size[1];
@@ -104,7 +104,9 @@ fn gen_image(scene: &Scene) -> RetainedImage {
 
     let image = ColorImage { size, pixels };
 
-    RetainedImage::from_color_image("coucoutest", image)
+    let image = RetainedImage::from_color_image("coucoutest", image);
+    println!("took {}ms", start.elapsed().as_millis());
+    image
 }
 
 fn hit_sphere(center: &Point3, radius: f64, ray: &Ray) -> f64 {
