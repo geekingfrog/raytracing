@@ -1,9 +1,7 @@
-use eframe::egui::{self, style::Spacing};
-use egui::{ColorImage, Rgba};
+use eframe::egui;
+use egui::ColorImage;
 use egui_extras::RetainedImage;
 
-#[macro_use]
-extern crate auto_ops;
 
 mod ray;
 mod scene;
@@ -16,7 +14,7 @@ use vec3::{Color, Point3, Vec3};
 fn main() {
     let options = eframe::NativeOptions::default();
     eframe::run_native(
-        "Download and show an image with eframe/egui",
+        "raaaaaaayz",
         options,
         Box::new(|_cc| Box::new(MyApp::default())),
     );
