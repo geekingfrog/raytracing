@@ -27,7 +27,7 @@ impl Scene {
         let vertical = Vec3::from([0.0, viewport_height, 0.0]);
         Scene {
             image_width,
-            image_height: (image_width as f64 / aspect_ratio) as _,
+            image_height: (image_width as f64 / aspect_ratio).ceil() as _,
             viewport_width,
             viewport_height,
             focal_length,

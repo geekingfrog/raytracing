@@ -24,7 +24,23 @@ fn main() {
 
 #[derive(Default)]
 struct MyApp {
-    img: Option<RetainedImage>,
+    display: Option<(Scene, RetainedImage)>,
+    last_size: egui::Vec2,
+}
+
+fn gen_scene(ui: &egui::Ui) -> Scene {
+    let size = ui.available_size();
+    let aspect_ratio = if size.y == 0.0 { 0.0 } else { size.x / size.y };
+
+    let viewport_height = 2.0;
+    let focal_length = 1.0;
+    Scene::new(
+        aspect_ratio.into(),
+        size.x as usize,
+        viewport_height,
+        focal_length,
+        vec3::ZERO,
+    )
 }
 
 impl eframe::App for MyApp {
@@ -32,26 +48,24 @@ impl eframe::App for MyApp {
         let frame = egui::containers::Frame::none();
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
             let size = ui.available_size();
-            let aspect_ratio = size.x / size.y;
-
-            let viewport_height = 2.0;
-            let focal_length = 1.0;
-            let scene = Scene::new(
-                aspect_ratio.into(),
-                size.x as usize,
-                viewport_height,
-                focal_length,
-                vec3::ZERO,
-            );
-
-            let size = [size.x as usize, size.y as usize];
-            let img = self.img.get_or_insert_with(|| gen_image(&scene));
-
-            if img.size() != size {
-                *img = gen_image(&scene);
+            if self.last_size == egui::Vec2::ZERO {
+                self.last_size = size;
             }
 
-            img.show(ui);
+            let img = self.display.get_or_insert_with(|| {
+                let scene = gen_scene(ui);
+                let img = gen_image(&scene);
+                (scene, img)
+            });
+
+            if self.last_size != size {
+                let scene = gen_scene(ui);
+                let i = gen_image(&scene);
+                *img = (scene, i);
+            };
+
+            img.1.show(ui);
+            self.last_size = size;
         });
     }
 }
