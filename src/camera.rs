@@ -1,7 +1,10 @@
-use crate::vec3::{Point3, Vec3};
+use crate::{
+    ray::Ray,
+    vec3::{Point3, Vec3},
+};
 
 #[derive(Debug)]
-pub(crate) struct Scene {
+pub(crate) struct Camera {
     pub(crate) image_width: usize,
     pub(crate) image_height: usize,
 
@@ -14,7 +17,7 @@ pub(crate) struct Scene {
     pub(crate) lower_left_corner: Vec3,
 }
 
-impl Scene {
+impl Camera {
     pub(crate) fn new(
         aspect_ratio: f64,
         image_width: usize,
@@ -25,7 +28,7 @@ impl Scene {
         let viewport_width = viewport_height * aspect_ratio;
         let horizontal = Vec3::from([viewport_width, 0.0, 0.0]);
         let vertical = Vec3::from([0.0, viewport_height, 0.0]);
-        Scene {
+        Camera {
             image_width,
             image_height: (image_width as f64 / aspect_ratio).ceil() as _,
             viewport_width,
@@ -38,6 +41,13 @@ impl Scene {
                 - horizontal / 2.0
                 - vertical / 2.0
                 - Vec3::from([0.0, 0.0, focal_length]),
+        }
+    }
+
+    pub(crate) fn get_ray(&self, u: f64, v: f64) -> Ray {
+        Ray {
+            orig: self.origin,
+            dir: self.lower_left_corner + u * self.horizontal + v * self.vertical,
         }
     }
 }

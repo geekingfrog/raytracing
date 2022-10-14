@@ -1,13 +1,14 @@
 use eframe::egui;
 use egui::ColorImage;
 use egui_extras::RetainedImage;
+use rand::random;
 
 mod ray;
-mod scene;
+mod camera;
 mod vec3;
 
 use ray::Ray;
-use scene::Scene;
+use camera::Camera;
 use vec3::{Color, Point3, Vec3};
 
 #[derive(Default)]
@@ -37,16 +38,16 @@ fn main() {
 #[derive(Default)]
 struct MyApp {
     world: World,
-    display: Option<(Scene, RetainedImage)>,
+    display: Option<(Camera, RetainedImage)>,
     last_size: egui::Vec2,
 }
 
-fn gen_scene(size: &egui::Vec2) -> Scene {
+fn gen_camera(size: &egui::Vec2) -> Camera {
     let aspect_ratio = if size.y == 0.0 { 0.0 } else { size.x / size.y };
 
     let viewport_height = 2.0;
     let focal_length = 1.0;
-    Scene::new(
+    Camera::new(
         aspect_ratio.into(),
         size.x as usize,
         viewport_height,
@@ -65,15 +66,15 @@ impl eframe::App for MyApp {
             }
 
             let img = self.display.get_or_insert_with(|| {
-                let scene = gen_scene(&ui.available_size());
-                let img = gen_image(&self.world, &scene);
-                (scene, img)
+                let camera = gen_camera(&ui.available_size());
+                let img = gen_image(&self.world, &camera);
+                (camera, img)
             });
 
             if self.last_size != size {
-                let scene = gen_scene(&ui.available_size());
-                let i = gen_image(&self.world, &scene);
-                *img = (scene, i);
+                let camera = gen_camera(&ui.available_size());
+                let i = gen_image(&self.world, &camera);
+                *img = (camera, i);
             };
 
             img.1.show(ui);
@@ -98,27 +99,30 @@ where
     }
 }
 
-fn gen_image(world: &World, scene: &Scene) -> RetainedImage {
+fn gen_image(world: &World, camera: &Camera) -> RetainedImage {
     let start = std::time::Instant::now();
-    let size = [scene.image_width, scene.image_height];
+    let size = [camera.image_width, camera.image_height];
     let width = size[0];
     let height = size[1];
-    println!("gen image {width}x{height}");
+    let samples_per_pixel = 100;
+
+    println!("gen image {width}x{height} ({samples_per_pixel})");
     let pixels: Vec<egui::Color32> = (0..height)
         .into_iter()
         .rev()
         .flat_map(|j| (0..width).into_iter().map(move |i| (i, j)))
         .map(|(i, j)| {
-            let u = (i as f64) / ((width - 1) as f64);
-            let v = (j as f64) / ((height - 1) as f64);
-            let dir =
-                scene.lower_left_corner + u * scene.horizontal + v * scene.vertical - scene.origin;
-            let ray = Ray {
-                orig: scene.origin,
-                dir,
+            let mut color = Color::default();
+            for _ in 0..samples_per_pixel {
+                let u = (i as f64 + random::<f64>()) / ((width - 1) as f64);
+                let v = (j as f64 + random::<f64>()) / ((height - 1) as f64);
+                let ray = camera.get_ray(u, v);
+                color += ray_color(world, &ray);
             };
 
-            ray_color(world, &ray).into()
+            let scale = 1.0 / samples_per_pixel as f64;
+            color = color * scale;
+            color.into()
         })
         .collect();
 
