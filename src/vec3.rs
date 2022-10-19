@@ -76,6 +76,14 @@ impl Vec3 {
         self / self.length()
     }
 
+    pub(crate) fn sqrt(&self) -> Self {
+        Self {
+            x: self.x.sqrt(),
+            y: self.y.sqrt(),
+            z: self.z.sqrt(),
+        }
+    }
+
     pub(crate) fn random() -> Self {
         Vec3 {
             x: random(),
@@ -101,6 +109,29 @@ impl Vec3 {
                 return p;
             }
         }
+    }
+
+    /// Lambertian diffusion
+    #[allow(dead_code)]
+    pub(crate) fn random_unit_vector() -> Self {
+        Self::random_in_unit_sphere().unit()
+    }
+
+    /// uniform scatter direction away from the hit point, widely used
+    /// before the adoption of Lambertian diffusion.
+    #[allow(dead_code)]
+    pub(crate) fn random_in_hemisphere(normal: &Vec3) -> Self {
+        let in_unit_sphere = Self::random_in_unit_sphere();
+        if in_unit_sphere.dot(normal) > 0.0 {
+            in_unit_sphere
+        } else {
+            -in_unit_sphere
+        }
+    }
+
+    pub(crate) fn is_near_zero(&self) -> bool {
+        let s = 1e-8;
+        (self.x.abs() < s) && (self.y.abs() < s) && (self.z.abs() < s)
     }
 }
 

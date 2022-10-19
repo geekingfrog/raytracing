@@ -1,29 +1,65 @@
+use std::rc::Rc;
+
 use eframe::egui;
 use egui::ColorImage;
 use egui_extras::RetainedImage;
+use material::{Lambertian, Material, Metal, Sphere};
 use rand::random;
 
 mod camera;
+mod material;
 mod ray;
 mod vec3;
 
 use camera::Camera;
-use ray::Ray;
+use ray::{HitRecord, Hittable, Ray};
 use vec3::{Color, Point3, Vec3};
+
+// put some globals for now
+/// how many ray per pixels (and its neighborhood)
+const SAMPLES_PER_PIXEL: usize = 50;
+
+/// how many maximum bounce for rays before we give up and return black
+const MAX_DEPTH: usize = 40;
 
 #[derive(Default)]
 struct World(Vec<Sphere>);
 
 fn main() {
     let options = eframe::NativeOptions::default();
+    let material_ground = Rc::new(Lambertian {
+        albedo: Color::from([0.8, 0.8, 0.0]),
+    }) as Rc<dyn Material>;
+    let material_center = Rc::new(Lambertian {
+        albedo: Color::from([0.7, 0.3, 0.3]),
+    }) as Rc<dyn Material>;
+    let material_left = Rc::new(Metal {
+        albedo: Color::from([0.8, 0.8, 0.8]),
+    }) as Rc<dyn Material>;
+    let material_right = Rc::new(Metal {
+        albedo: Color::from([0.8, 0.6, 0.2]),
+    }) as Rc<dyn Material>;
+
     let world = World(vec![
-        Sphere {
-            center: Vec3::from([0.0, 0.0, -1.0]),
-            radius: 0.5,
-        },
         Sphere {
             center: Vec3::from([0.0, -100.5, -1.0]),
             radius: 100.0,
+            material: Rc::clone(&material_ground),
+        },
+        Sphere {
+            center: Vec3::from([0.0, 0.0, -1.0]),
+            radius: 0.5,
+            material: Rc::clone(&material_center),
+        },
+        Sphere {
+            center: Vec3::from([-1.0, 0.0, -1.0]),
+            radius: 0.5,
+            material: Rc::clone(&material_left),
+        },
+        Sphere {
+            center: Vec3::from([1.0, 0.0, -1.0]),
+            radius: 0.5,
+            material: Rc::clone(&material_right),
         },
     ]);
 
@@ -87,18 +123,37 @@ fn ray_color<T>(world: T, ray: &Ray, depth: usize) -> Color
 where
     T: Hittable,
 {
-    if depth >= 40 {
+    if depth >= MAX_DEPTH {
         return Color::default();
     }
 
-    match world.hit(ray, 0.0, f64::INFINITY) {
+    match world.hit(ray, 0.0001, f64::INFINITY) {
         Some(hit) => {
-            let target = hit.p + hit.normal + Vec3::random_in_unit_sphere();
-            let r = Ray {
-                orig: hit.p,
-                dir: target - hit.p,
-            };
-            0.5 * ray_color(world, &r, depth + 1)
+            // lazy lambertian, which has a distribution of cos³(Φ), with Φ the
+            // angle from the normal. That means we prefer reflections closer to
+            // the normal, meaning lower probability for rays at grazing angle.
+            // let target = hit.p + hit.normal + Vec3::random_in_unit_sphere();
+
+            // lambertian reflection, which has a distribution of cos(Φ)
+            // this leads to less pronounced shadows, and lighter spheres.
+            // let target = hit.p + hit.normal + Vec3::random_in_unit_sphere();
+
+            // let target = hit.p + Vec3::random_in_hemisphere(&hit.normal);
+
+            match hit.mat.scatter(&ray, &hit) {
+                Some((scattered, attenuation)) => {
+                    attenuation * ray_color(world, &scattered, depth + 1)
+                },
+                None => {
+                    Color::default()
+                },
+            }
+            //
+            // let r = Ray {
+            //     orig: hit.p,
+            //     dir: target - hit.p,
+            // };
+            // 0.5 * ray_color(world, &r, depth + 1)
         }
         None => {
             let unit_direction = ray.dir.unit();
@@ -113,9 +168,8 @@ fn gen_image(world: &World, camera: &Camera) -> RetainedImage {
     let size = [camera.image_width, camera.image_height];
     let width = size[0];
     let height = size[1];
-    let samples_per_pixel = 10;
 
-    println!("gen image {width}x{height} ({samples_per_pixel})");
+    println!("gen image {width}x{height} ({SAMPLES_PER_PIXEL})");
     let pixels: Vec<egui::Color32> = (0..height)
         .into_iter()
         .rev()
@@ -126,15 +180,15 @@ fn gen_image(world: &World, camera: &Camera) -> RetainedImage {
             }
 
             let mut color = Color::default();
-            for _ in 0..samples_per_pixel {
+            for _ in 0..SAMPLES_PER_PIXEL {
                 let u = (i as f64 + random::<f64>()) / ((width - 1) as f64);
                 let v = (j as f64 + random::<f64>()) / ((height - 1) as f64);
                 let ray = camera.get_ray(u, v);
                 color += ray_color(world, &ray, 0);
             }
 
-            let scale = 1.0 / samples_per_pixel as f64;
-            color = color * scale;
+            let scale = 1.0 / SAMPLES_PER_PIXEL as f64;
+            color = (color * scale).sqrt();
             color.into()
         })
         .collect();
@@ -146,85 +200,56 @@ fn gen_image(world: &World, camera: &Camera) -> RetainedImage {
     image
 }
 
-#[derive(Debug)]
-enum Face {
-    Front,
-    Back,
-}
-
-#[derive(Debug)]
-struct HitRecord {
-    p: Point3,
-    normal: Vec3,
-    t: f64,
-    face: Face,
-}
-
-impl HitRecord {
-    fn new(p: Point3, outward_normal: Vec3, t: f64, ray: &Ray) -> Self {
-        let (normal, face) = if ray.dir.dot(&outward_normal) > 0.0 {
-            (-outward_normal, Face::Back)
-        } else {
-            (outward_normal, Face::Front)
-        };
-        Self { p, normal, t, face }
-    }
-}
-
-trait Hittable {
-    fn hit(&self, ray: &Ray, tmin: f64, tmax: f64) -> Option<HitRecord>;
-}
-
-#[derive(Debug, Default)]
-struct Sphere {
-    center: Point3,
-    radius: f64,
-}
-
-impl Hittable for Sphere {
-    fn hit(&self, ray: &Ray, tmin: f64, tmax: f64) -> Option<HitRecord> {
-        let oc = ray.orig - self.center;
-        let a = ray.dir.length_squared();
-        let half_b = oc.dot(&ray.dir);
-        let c = oc.length_squared() - self.radius * self.radius;
-        let discriminant = half_b * half_b - a * c;
-        if discriminant < 0.0 {
-            return None;
-        }
-
-        let sqrtd = discriminant.sqrt();
-        // find the nearest root that lies in the acceptable range
-        let mut root = (-half_b - sqrtd) / a;
-        if root < tmin || tmax < root {
-            root = (-half_b + sqrtd) / a;
-            if root < tmin || tmax < root {
-                return None;
-            }
-        }
-
-        let p = ray.at(root);
-        let outward_normal = (p - self.center) / self.radius;
-        Some(HitRecord::new(p, outward_normal, root, ray))
-    }
-}
-
-impl<T> Hittable for Vec<T>
-where
-    T: Hittable,
-{
-    fn hit(&self, ray: &Ray, tmin: f64, tmax: f64) -> Option<HitRecord> {
-        let mut closest_so_far = tmax;
-        let mut hit = None;
-
-        for obj in self {
-            if let Some(obj_hit) = obj.hit(ray, tmin, closest_so_far) {
-                closest_so_far = obj_hit.t;
-                hit = Some(obj_hit);
-            }
-        }
-        hit
-    }
-}
+// #[derive(Debug, Default)]
+// struct Sphere {
+//     center: Point3,
+//     radius: f64,
+// }
+//
+// impl Hittable for Sphere {
+//     fn hit(&self, ray: &Ray, tmin: f64, tmax: f64) -> Option<HitRecord> {
+//         let oc = ray.orig - self.center;
+//         let a = ray.dir.length_squared();
+//         let half_b = oc.dot(&ray.dir);
+//         let c = oc.length_squared() - self.radius * self.radius;
+//         let discriminant = half_b * half_b - a * c;
+//         if discriminant < 0.0 {
+//             return None;
+//         }
+//
+//         let sqrtd = discriminant.sqrt();
+//         // find the nearest root that lies in the acceptable range
+//         let mut root = (-half_b - sqrtd) / a;
+//         if root < tmin || tmax < root {
+//             root = (-half_b + sqrtd) / a;
+//             if root < tmin || tmax < root {
+//                 return None;
+//             }
+//         }
+//
+//         let p = ray.at(root);
+//         let outward_normal = (p - self.center) / self.radius;
+//         Some(HitRecord::new(p, outward_normal, root, ray))
+//     }
+// }
+//
+// impl<T> Hittable for Vec<T>
+// where
+//     T: Hittable,
+// {
+//     fn hit(&self, ray: &Ray, tmin: f64, tmax: f64) -> Option<HitRecord> {
+//         let mut closest_so_far = tmax;
+//         let mut hit = None;
+//
+//         for obj in self {
+//             if let Some(obj_hit) = obj.hit(ray, tmin, closest_so_far) {
+//                 closest_so_far = obj_hit.t;
+//                 hit = Some(obj_hit);
+//             }
+//         }
+//         hit
+//     }
+// }
 
 impl<'a> Hittable for &'a World {
     fn hit(&self, ray: &Ray, tmin: f64, tmax: f64) -> Option<HitRecord> {
