@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::material::{self, Material};
+use crate::material::Material;
 use crate::vec3::{Point3, Vec3};
 
 #[derive(Debug)]
@@ -22,21 +22,21 @@ pub(crate) enum Face {
 }
 
 #[derive(Debug)]
-pub(crate) struct HitRecord {
+pub(crate) struct HitRecord<'a> {
     pub(crate) p: Point3,
     pub(crate) normal: Vec3,
     pub(crate) t: f64,
     pub(crate) face: Face,
-    pub(crate) mat: Rc<dyn Material>,
+    pub(crate) mat: &'a Material,
 }
 
-impl HitRecord {
+impl<'a> HitRecord<'a> {
     pub(crate) fn new(
         p: Point3,
         outward_normal: Vec3,
         t: f64,
         ray: &Ray,
-        mat: Rc<dyn Material>,
+        mat: &'a Material,
     ) -> Self {
         let (normal, face) = if ray.dir.dot(&outward_normal) > 0.0 {
             (-outward_normal, Face::Back)
