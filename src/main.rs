@@ -35,15 +35,12 @@ fn main() {
         albedo: Color::from([0.8, 0.8, 0.0]),
     };
     let material_center = Material::Lambertian {
-        albedo: Color::from([0.7, 0.3, 0.3]),
+        albedo: Color::from([0.1, 0.2, 0.5]),
     };
-    let material_left = Material::Metal {
-        albedo: Color::from([0.8, 0.8, 0.8]),
-        fuzz: 0.3,
-    };
+    let material_left = Material::Dielectric { ir: 1.5 };
     let material_right = Material::Metal {
         albedo: Color::from([0.8, 0.6, 0.2]),
-        fuzz: 1.0,
+        fuzz: 0.0,
     };
 
     let materials = vec![
@@ -70,6 +67,13 @@ fn main() {
                 Sphere {
                     center: Vec3::from([-1.0, 0.0, -1.0]),
                     radius: 0.5,
+                    material: &ms[2],
+                },
+                Sphere {
+                    center: Vec3::from([-1.0, 0.0, -1.0]),
+                    // negative radius for dielectric material (glass) means the normal
+                    // points inward, which creates a hollow glass sphere
+                    radius: -0.4,
                     material: &ms[2],
                 },
                 Sphere {

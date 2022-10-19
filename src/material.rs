@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::{
-    ray::{HitRecord, Hittable, Ray},
+    ray::{Face, HitRecord, Hittable, Ray},
     vec3::{Color, Point3, Vec3},
 };
 
@@ -30,6 +30,28 @@ pub(crate) enum Material {
         albedo: Color,
         fuzz: f64,
     },
+    Dielectric {
+        /// index of refraction
+        ir: f64,
+    },
+}
+
+fn reflect(v: &Vec3, n: &Vec3) -> Vec3 {
+    v - 2.0 * v.dot(n) * n
+}
+
+fn refract(uv: &Vec3, n: &Vec3, etai_over_etat: f64) -> Vec3 {
+    let cos_theta = (-uv).dot(n).min(1.0);
+    let r_out_perp = etai_over_etat * (uv + cos_theta * n);
+    let r_out_parallel = -(1.0 - r_out_perp.length_squared()).abs().sqrt() * n;
+    r_out_perp + r_out_parallel
+}
+
+fn reflectance(cos: f64, ref_idx: f64) -> f64 {
+    //Schlick's approximation for reflectance
+    let r0 = (1.0 - ref_idx) / (1.0 + ref_idx);
+    let r0 = r0 * r0;
+    r0 + (1.0 - r0) * (1.0 - cos).powf(5.0)
 }
 
 impl Material {
@@ -49,7 +71,7 @@ impl Material {
             }
             Material::Metal { albedo, fuzz } => {
                 let v = ray_in.dir.unit();
-                let reflected = v - 2.0 * v.dot(&hit.normal) * hit.normal;
+                let reflected = reflect(&v, &hit.normal);
                 let scattered = Ray {
                     orig: hit.p,
                     dir: reflected + *fuzz * Vec3::random_in_unit_sphere(),
@@ -60,6 +82,28 @@ impl Material {
                 } else {
                     None
                 }
+            }
+            Material::Dielectric { ir } => {
+                let attenuation = Color::from([1.0, 1.0, 1.0]);
+                let refraction_ratio = match hit.face {
+                    Face::Front => 1.0 / ir,
+                    Face::Back => *ir,
+                };
+                let unit_direction = ray_in.dir.unit();
+                let cos_theta = (-unit_direction.dot(&hit.normal)).min(1.0);
+                let sin_theta = (1.0 - cos_theta * cos_theta).sqrt();
+
+                let cannot_refract = refraction_ratio * sin_theta > 1.0;
+                let dir = if cannot_refract
+                    || reflectance(cos_theta, refraction_ratio) > rand::random()
+                {
+                    reflect(&unit_direction, &hit.normal)
+                } else {
+                    refract(&unit_direction, &hit.normal, refraction_ratio)
+                };
+
+                let scattered = Ray { orig: hit.p, dir };
+                Some((scattered, attenuation))
             }
         }
     }
