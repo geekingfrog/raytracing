@@ -3,12 +3,12 @@ use egui::ColorImage;
 use egui_extras::RetainedImage;
 use rand::random;
 
-mod ray;
 mod camera;
+mod ray;
 mod vec3;
 
-use ray::Ray;
 use camera::Camera;
+use ray::Ray;
 use vec3::{Color, Point3, Vec3};
 
 #[derive(Default)]
@@ -83,13 +83,22 @@ impl eframe::App for MyApp {
     }
 }
 
-fn ray_color<T>(world: T, ray: &Ray) -> Color
+fn ray_color<T>(world: T, ray: &Ray, depth: usize) -> Color
 where
     T: Hittable,
 {
+    if depth >= 40 {
+        return Color::default();
+    }
+
     match world.hit(ray, 0.0, f64::INFINITY) {
         Some(hit) => {
-            0.5 * (hit.normal + Color::from([1.0, 1.0, 1.0]))
+            let target = hit.p + hit.normal + Vec3::random_in_unit_sphere();
+            let r = Ray {
+                orig: hit.p,
+                dir: target - hit.p,
+            };
+            0.5 * ray_color(world, &r, depth + 1)
         }
         None => {
             let unit_direction = ray.dir.unit();
@@ -104,7 +113,7 @@ fn gen_image(world: &World, camera: &Camera) -> RetainedImage {
     let size = [camera.image_width, camera.image_height];
     let width = size[0];
     let height = size[1];
-    let samples_per_pixel = 100;
+    let samples_per_pixel = 10;
 
     println!("gen image {width}x{height} ({samples_per_pixel})");
     let pixels: Vec<egui::Color32> = (0..height)
@@ -112,13 +121,17 @@ fn gen_image(world: &World, camera: &Camera) -> RetainedImage {
         .rev()
         .flat_map(|j| (0..width).into_iter().map(move |i| (i, j)))
         .map(|(i, j)| {
+            if i == 0 {
+                println!("line {}", j);
+            }
+
             let mut color = Color::default();
             for _ in 0..samples_per_pixel {
                 let u = (i as f64 + random::<f64>()) / ((width - 1) as f64);
                 let v = (j as f64 + random::<f64>()) / ((height - 1) as f64);
                 let ray = camera.get_ray(u, v);
-                color += ray_color(world, &ray);
-            };
+                color += ray_color(world, &ray, 0);
+            }
 
             let scale = 1.0 / samples_per_pixel as f64;
             color = color * scale;

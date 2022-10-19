@@ -2,6 +2,7 @@ use crate::egui::Color32;
 use std::fmt::Display;
 
 use auto_ops::*;
+use rand::{distributions::Uniform, random, thread_rng, Rng};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub(crate) struct Vec3 {
@@ -73,6 +74,33 @@ impl Vec3 {
 
     pub(crate) fn unit(&self) -> Self {
         self / self.length()
+    }
+
+    pub(crate) fn random() -> Self {
+        Vec3 {
+            x: random(),
+            y: random(),
+            z: random(),
+        }
+    }
+
+    pub(crate) fn random_range(min: f64, max: f64) -> Self {
+        let mut rng = thread_rng();
+        let d = Uniform::new(min, max);
+        Vec3 {
+            x: rng.sample(d),
+            y: rng.sample(d),
+            z: rng.sample(d),
+        }
+    }
+
+    pub(crate) fn random_in_unit_sphere() -> Self {
+        loop {
+            let p = Self::random_range(-1.0, 1.0);
+            if p.length_squared() < 1.0 {
+                return p;
+            }
+        }
     }
 }
 
