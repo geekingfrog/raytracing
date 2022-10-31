@@ -50,10 +50,30 @@ fn main() {
         material_right,
     ];
 
+    // let blue_red = vec![
+    //     Material::Lambertian {
+    //         albedo: Color::from([0.0, 0.0, 1.0]),
+    //     },
+    //     Material::Lambertian {
+    //         albedo: Color::from([1.0, 0.0, 0.0]),
+    //     },
+    // ];
+    // let r = (std::f64::consts::PI / 4.0).cos();
+
     let world = WorldBuilder {
         materials,
         spheres_builder: |ms| {
             vec![
+                //     Sphere {
+                //         center: Vec3::from([-r, 0.0, -1.0]),
+                //         radius: r,
+                //         material: &ms[0],
+                //     },
+                //     Sphere {
+                //         center: Vec3::from([r, 0.0, -1.0]),
+                //         radius: r,
+                //         material: &ms[1],
+                //     },
                 Sphere {
                     center: Vec3::from([0.0, -100.5, -1.0]),
                     radius: 100.0,
@@ -127,12 +147,14 @@ struct MyApp {
 fn gen_camera(size: &egui::Vec2) -> Camera {
     let aspect_ratio = if size.y == 0.0 { 0.0 } else { size.x / size.y };
 
-    let viewport_height = 2.0;
     let focal_length = 1.0;
     Camera::new(
+        Vec3::from([-2.0, 2.0, 1.0]),
+        Vec3::from([0.0, 0.0, -1.0]),
+        Vec3::from([0.0, 1.0, 0.0]),
+        20.0,
         aspect_ratio.into(),
         size.x as usize,
-        viewport_height,
         focal_length,
         vec3::ZERO,
     )
