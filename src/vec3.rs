@@ -33,6 +33,16 @@ impl From<[f64; 3]> for Vec3 {
     }
 }
 
+impl From<[isize; 3]> for Vec3 {
+    fn from(x: [isize; 3]) -> Self {
+        Vec3 {
+            x: x[0] as f64,
+            y: x[1] as f64,
+            z: x[2] as f64,
+        }
+    }
+}
+
 impl From<Vec3> for Color32 {
     fn from(c: Vec3) -> Self {
         Color32::from_rgb(
@@ -105,6 +115,16 @@ impl Vec3 {
     pub(crate) fn random_in_unit_sphere() -> Self {
         loop {
             let p = Self::random_range(-1.0, 1.0);
+            if p.length_squared() < 1.0 {
+                return p;
+            }
+        }
+    }
+
+    pub(crate) fn random_in_unit_disk() -> Self {
+        loop {
+            let mut p = Self::random_range(-1.0, 1.0);
+            p.z = 0.0;
             if p.length_squared() < 1.0 {
                 return p;
             }

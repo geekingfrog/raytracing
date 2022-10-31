@@ -148,15 +148,21 @@ fn gen_camera(size: &egui::Vec2) -> Camera {
     let aspect_ratio = if size.y == 0.0 { 0.0 } else { size.x / size.y };
 
     let focal_length = 1.0;
+    let look_from = Vec3::from([3, 3, 2]);
+    let look_at = Vec3::from([0, 0, -1]);
+    let vup = Vec3::from([0, 1, 0]);
+    let aperture = 2.0;
+    let dist_to_focus = (look_from - look_at).length();
     Camera::new(
-        Vec3::from([-2.0, 2.0, 1.0]),
-        Vec3::from([0.0, 0.0, -1.0]),
-        Vec3::from([0.0, 1.0, 0.0]),
+        look_from,
+        look_at,
+        vup,
         20.0,
         aspect_ratio.into(),
         size.x as usize,
         focal_length,
-        vec3::ZERO,
+        aperture,
+        dist_to_focus,
     )
 }
 
@@ -224,7 +230,7 @@ where
         None => {
             let unit_direction = ray.dir.unit();
             let t = 0.5 * (unit_direction.y + 1.0);
-            (1.0 - t) * Color::from([1.0, 1.0, 1.0]) + t * Color::from([0.5, 0.7, 1.0])
+            (1.0 - t) * Color::from([1, 1, 0]) + t * Color::from([0.5, 0.7, 1.0])
         }
     }
 }
