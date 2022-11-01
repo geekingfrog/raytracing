@@ -2,7 +2,8 @@ use eframe::egui;
 use egui::ColorImage;
 use egui_extras::RetainedImage;
 use material::{Material, Sphere};
-use rand::random;
+use rand::{distributions::Uniform, random, thread_rng, Rng};
+use rayon::prelude::*;
 
 mod camera;
 mod material;
@@ -22,6 +23,88 @@ const MAX_DEPTH: usize = 40;
 
 struct World {
     spheres: Vec<Sphere>,
+}
+
+impl World {
+    fn new_random() -> Self {
+        let mut spheres = vec![];
+        let mut rng = thread_rng();
+
+        let ground_material = Material::Lambertian {
+            albedo: Color::from([0.5, 0.5, 0.5]),
+        };
+        spheres.push(Sphere {
+            center: Vec3::from([0, -1000, 0]),
+            radius: 1000.0,
+            material: ground_material,
+        });
+
+        for a in -11..11 {
+            for b in -11..11 {
+                let center = Vec3::from([
+                    a as f64 + 0.9 * random::<f64>(),
+                    0.2,
+                    b as f64 + 0.9 * random::<f64>(),
+                ]);
+
+                if (center - Vec3::from([4.0, 0.2, 0.0])).length() > 0.9 {
+                    let choose_mat = random::<f64>();
+                    if choose_mat < 0.8 {
+                        // diffuse
+                        let albedo = Color::random() * Color::random();
+                        let material = Material::Lambertian { albedo };
+                        spheres.push(Sphere {
+                            center,
+                            radius: 0.2,
+                            material,
+                        });
+                    } else if choose_mat < 0.95 {
+                        // metal
+                        let albedo = Color::random_range(0.5, 1.0);
+                        let fuzz = rng.sample(Uniform::new(0.0, 0.5));
+                        let material = Material::Metal { albedo, fuzz };
+                        spheres.push(Sphere {
+                            center,
+                            radius: 0.2,
+                            material,
+                        });
+                    } else {
+                        // glass
+                        spheres.push(Sphere {
+                            center,
+                            radius: 0.2,
+                            material: Material::Dielectric { ir: 1.5 },
+                        })
+                    }
+                }
+            }
+        }
+
+        spheres.push(Sphere {
+            center: Vec3::from([0, 1, 0]),
+            radius: 1.0,
+            material: Material::Dielectric { ir: 1.5 },
+        });
+
+        spheres.push(Sphere {
+            center: Vec3::from([-4, 1, 0]),
+            radius: 1.0,
+            material: Material::Lambertian {
+                albedo: Color::from([0.5, 0.2, 0.1]),
+            },
+        });
+
+        spheres.push(Sphere {
+            center: Vec3::from([4, 1, 0]),
+            radius: 1.0,
+            material: Material::Metal {
+                albedo: Color::from([0.7, 0.6, 0.5]),
+                fuzz: 0.0,
+            },
+        });
+
+        World { spheres }
+    }
 }
 
 fn main() {
@@ -87,31 +170,8 @@ fn main() {
         ],
     };
 
-    // let world = World(vec![
-    //     Sphere {
-    //         center: Vec3::from([0.0, -100.5, -1.0]),
-    //         radius: 100.0,
-    //         material: &material_ground,
-    //     },
-    //     Sphere {
-    //         center: Vec3::from([0.0, 0.0, -1.0]),
-    //         radius: 0.5,
-    //         material: &material_center,
-    //     },
-    //     Sphere {
-    //         center: Vec3::from([-1.0, 0.0, -1.0]),
-    //         radius: 0.5,
-    //         material: &material_left,
-    //     },
-    //     Sphere {
-    //         center: Vec3::from([1.0, 0.0, -1.0]),
-    //         radius: 0.5,
-    //         material: &material_right,
-    //     },
-    // ]);
-
     let app = MyApp {
-        world,
+        world: World::new_random(),
         display: None,
         last_size: egui::Vec2::default(),
     };
@@ -129,11 +189,12 @@ fn gen_camera(size: &egui::Vec2) -> Camera {
     let aspect_ratio = if size.y == 0.0 { 0.0 } else { size.x / size.y };
 
     let focal_length = 1.0;
-    let look_from = Vec3::from([3, 3, 2]);
-    let look_at = Vec3::from([0, 0, -1]);
+    let look_from = Vec3::from([13, 2, 3]);
+    let look_at = Vec3::from([0, 0, 0]);
     let vup = Vec3::from([0, 1, 0]);
-    let aperture = 2.0;
-    let dist_to_focus = (look_from - look_at).length();
+    let aperture = 0.1;
+    // let dist_to_focus = (look_from - look_at).length();
+    let dist_to_focus = 10.0;
     Camera::new(
         look_from,
         look_at,
@@ -224,9 +285,9 @@ fn gen_image(world: &World, camera: &Camera) -> RetainedImage {
 
     println!("gen image {width}x{height} ({SAMPLES_PER_PIXEL})");
     let pixels: Vec<egui::Color32> = (0..height)
-        .into_iter()
+        .into_par_iter()
         .rev()
-        .flat_map(|j| (0..width).into_iter().map(move |i| (i, j)))
+        .flat_map_iter(|j| (0..width).into_iter().map(move |i| (i, j)))
         .map(|(i, j)| {
             if i == 0 {
                 println!("line {}", j);
