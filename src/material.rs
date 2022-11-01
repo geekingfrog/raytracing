@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::{
     ray::{Face, HitRecord, Hittable, Ray},
     vec3::{Color, Point3, Vec3},
@@ -110,10 +108,10 @@ impl Material {
 }
 
 #[derive(Debug)]
-pub(crate) struct Sphere<'a> {
+pub(crate) struct Sphere {
     pub(crate) center: Point3,
     pub(crate) radius: f64,
-    pub(crate) material: &'a Material,
+    pub(crate) material: Material,
 }
 
 // impl std::fmt::Debug for Sphere {
@@ -126,7 +124,7 @@ pub(crate) struct Sphere<'a> {
 //     }
 // }
 
-impl<'a> Hittable for Sphere<'a> {
+impl Hittable for Sphere {
     fn hit(&self, ray: &Ray, tmin: f64, tmax: f64) -> Option<HitRecord> {
         let oc = ray.orig - self.center;
         let a = ray.dir.length_squared();
@@ -149,7 +147,7 @@ impl<'a> Hittable for Sphere<'a> {
 
         let p = ray.at(root);
         let outward_normal = (p - self.center) / self.radius;
-        Some(HitRecord::new(p, outward_normal, root, ray, self.material))
+        Some(HitRecord::new(p, outward_normal, root, ray, &self.material))
     }
 }
 

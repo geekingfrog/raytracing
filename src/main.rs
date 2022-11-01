@@ -20,13 +20,8 @@ const SAMPLES_PER_PIXEL: usize = 50;
 /// how many maximum bounce for rays before we give up and return black
 const MAX_DEPTH: usize = 40;
 
-// #[derive(Default)]
-#[ouroboros::self_referencing]
 struct World {
-    materials: Vec<Material>,
-    #[borrows(materials)]
-    #[covariant]
-    spheres: Vec<Sphere<'this>>,
+    spheres: Vec<Sphere>,
 }
 
 fn main() {
@@ -60,51 +55,37 @@ fn main() {
     // ];
     // let r = (std::f64::consts::PI / 4.0).cos();
 
-    let world = WorldBuilder {
-        materials,
-        spheres_builder: |ms| {
-            vec![
-                //     Sphere {
-                //         center: Vec3::from([-r, 0.0, -1.0]),
-                //         radius: r,
-                //         material: &ms[0],
-                //     },
-                //     Sphere {
-                //         center: Vec3::from([r, 0.0, -1.0]),
-                //         radius: r,
-                //         material: &ms[1],
-                //     },
-                Sphere {
-                    center: Vec3::from([0.0, -100.5, -1.0]),
-                    radius: 100.0,
-                    material: &ms[0],
-                },
-                Sphere {
-                    center: Vec3::from([0.0, 0.0, -1.0]),
-                    radius: 0.5,
-                    material: &ms[1],
-                },
-                Sphere {
-                    center: Vec3::from([-1.0, 0.0, -1.0]),
-                    radius: 0.5,
-                    material: &ms[2],
-                },
-                Sphere {
-                    center: Vec3::from([-1.0, 0.0, -1.0]),
-                    // negative radius for dielectric material (glass) means the normal
-                    // points inward, which creates a hollow glass sphere
-                    radius: -0.4,
-                    material: &ms[2],
-                },
-                Sphere {
-                    center: Vec3::from([1.0, 0.0, -1.0]),
-                    radius: 0.5,
-                    material: &ms[3],
-                },
-            ]
-        },
-    }
-    .build();
+    let world = World {
+        spheres: vec![
+            Sphere {
+                center: Vec3::from([0.0, -100.5, -1.0]),
+                radius: 100.0,
+                material: materials[0].clone(),
+            },
+            Sphere {
+                center: Vec3::from([0.0, 0.0, -1.0]),
+                radius: 0.5,
+                material: materials[1].clone(),
+            },
+            Sphere {
+                center: Vec3::from([-1.0, 0.0, -1.0]),
+                radius: 0.5,
+                material: materials[2].clone(),
+            },
+            Sphere {
+                center: Vec3::from([-1.0, 0.0, -1.0]),
+                // negative radius for dielectric material (glass) means the normal
+                // points inward, which creates a hollow glass sphere
+                radius: -0.4,
+                material: materials[2].clone(),
+            },
+            Sphere {
+                center: Vec3::from([1.0, 0.0, -1.0]),
+                radius: 0.5,
+                material: materials[3].clone(),
+            },
+        ],
+    };
 
     // let world = World(vec![
     //     Sphere {
@@ -214,7 +195,7 @@ where
 
             // let target = hit.p + Vec3::random_in_hemisphere(&hit.normal);
 
-            match hit.mat.scatter(&ray, &hit) {
+            match hit.mat.scatter(ray, &hit) {
                 Some((scattered, attenuation)) => {
                     attenuation * ray_color(world, &scattered, depth + 1)
                 }
@@ -274,6 +255,6 @@ fn gen_image(world: &World, camera: &Camera) -> RetainedImage {
 
 impl<'a> Hittable for &'a World {
     fn hit(&self, ray: &Ray, tmin: f64, tmax: f64) -> Option<HitRecord> {
-        self.borrow_spheres().hit(ray, tmin, tmax)
+        self.spheres.hit(ray, tmin, tmax)
     }
 }
