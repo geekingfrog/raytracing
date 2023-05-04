@@ -305,6 +305,7 @@ enum AppState {
     Computing {
         camera: Camera,
         pixels: Vec<egui::Color32>,
+        prev_size: egui::Vec2,
         prev_image: RetainedImage,
     },
 }
@@ -317,8 +318,8 @@ fn gen_camera(size: &egui::Vec2) -> Camera {
     let look_at = Vec3::from([0, 0, 0]);
     let vup = Vec3::from([0, 1, 0]);
     let aperture = 0.1;
-    let dist_to_focus = (look_from - look_at).length();
-    // let dist_to_focus = 10.0;
+    // let dist_to_focus = (look_from - look_at).length();
+    let dist_to_focus = 10.0;
     Camera::new(
         look_from,
         look_at,
@@ -332,67 +333,84 @@ fn gen_camera(size: &egui::Vec2) -> Camera {
     )
 }
 
+impl MyApp {
+    fn start(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        println!("starting for size {:?}", ui.available_size());
+        let size = ui.available_size();
+        let camera = gen_camera(&size);
+        // let camera = gen_camera(&[561.9,294.4].into());
+        let n = camera.image_width * camera.image_height;
+        let pixels: Vec<egui::Color32> = (0..n)
+            .into_iter()
+            .map(|_| egui::Color32::LIGHT_RED)
+            .collect();
+        let image = ColorImage {
+            size: [camera.image_width, camera.image_height],
+            pixels: pixels.clone(),
+        };
+        let image = RetainedImage::from_color_image("coucoustart", image);
+        image.show(ui);
+
+        let band_width = camera.image_width / self.commands.len();
+        let band_offset = camera.image_width % self.commands.len();
+        for (i, chan) in self.commands.iter().enumerate() {
+            let (x0, x1) = if i == 0 {
+                (0, band_width + band_offset)
+            } else {
+                let x = band_offset + band_width * i;
+                (x, x + band_width)
+            };
+
+            let spec = WorkerSpec {
+                generation: self.current_gen,
+                range: ((x0, 0), (x1, camera.image_height)),
+                camera: camera.clone(),
+            };
+            chan.send(spec).unwrap();
+        }
+
+        self.state = AppState::Computing {
+            camera,
+            pixels,
+            prev_size: size,
+            prev_image: image,
+        };
+    }
+}
+
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let frame = egui::containers::Frame::none();
-        egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
-            println!("size: {:?}", ui.available_size());
+        egui::CentralPanel::default().frame(frame).show(ctx, |mut ui| {
             match &mut self.state {
                 AppState::Starting => {
-                    let ctx2 = ctx.clone();
-                    thread::spawn(move || loop {
-                        thread::sleep(Duration::from_millis(500));
-                        ctx2.request_repaint();
-                    });
-
-                    println!("starting for size {:?}", ui.available_size());
-                    // let camera = gen_camera(&ui.available_size());
-                    let camera = gen_camera(&[561.9,294.4].into());
-                    let n = camera.image_width * camera.image_height;
-                    let pixels: Vec<egui::Color32> = (0..n)
-                        .into_iter()
-                        .map(|_| egui::Color32::LIGHT_RED)
-                        .collect();
-                    let image = ColorImage {
-                        size: [camera.image_width, camera.image_height],
-                        pixels: pixels.clone(),
-                    };
-                    let image = RetainedImage::from_color_image("coucoustart", image);
-                    image.show(ui);
-
-                    let band_width = camera.image_width / self.commands.len();
-                    let band_offset = camera.image_width % self.commands.len();
-                    for (i, chan) in self.commands.iter().enumerate() {
-                        let (x0, x1) = if i == 0 {
-                            (0, band_width + band_offset)
-                        } else {
-                            let x = band_offset + band_width * i;
-                            (x, x + band_width)
-                        };
-
-                        let spec = WorkerSpec {
-                            generation: self.current_gen,
-                            range: ((x0, 0), (x1, camera.image_height)),
-                            camera: camera.clone(),
-                        };
-                        chan.send(spec).unwrap();
-                    }
-
-                    self.state = AppState::Computing {
-                        camera,
-                        pixels,
-                        prev_image: image,
-                    };
+                    self.start(ctx, &mut ui);
                 }
                 AppState::Computing {
                     camera,
                     pixels,
+                    prev_size,
                     prev_image,
                 } => {
+                    let size = ui.available_size();
+                    if &size != prev_size {
+                        *prev_size = size;
+                        self.current_gen += 1;
+                        self.start(ctx, &mut ui);
+                        return;
+                    };
+
+                    // ensure we keep updating the image even if there's no user
+                    // activity (in this case, `update` isn't called)
+                    ctx.request_repaint_after(Duration::from_millis(32));
+
                     for (gen, (x, y), color) in self.result_channel.try_iter() {
                         if gen != self.current_gen {
                             continue;
-                        }
+                        };
+                        // reverse the y axis because the internal image representation
+                        // has its y axis pointing downward while our own axis is upward
+                        let y = camera.image_height - y - 1;
                         pixels[camera.image_width * y + x] = color;
                     }
                     let image = ColorImage {
