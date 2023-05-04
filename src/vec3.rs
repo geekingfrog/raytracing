@@ -4,7 +4,7 @@ use std::fmt::Display;
 use auto_ops::*;
 use rand::{distributions::Uniform, random, thread_rng, Rng};
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub(crate) struct Vec3 {
     pub(crate) x: f64,
     pub(crate) y: f64,

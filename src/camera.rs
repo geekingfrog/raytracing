@@ -5,7 +5,7 @@ use crate::{
     vec3::{Point3, Vec3},
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Camera {
     pub(crate) image_width: usize,
     pub(crate) image_height: usize,
