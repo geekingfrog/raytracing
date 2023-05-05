@@ -1,7 +1,7 @@
 use std::{
     sync::{mpsc, Arc},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use eframe::egui;
@@ -22,7 +22,7 @@ use vec3::{Color, Vec3};
 
 // put some globals for now
 /// how many ray per pixels (and its neighborhood)
-const SAMPLES_PER_PIXEL: usize = 2; // 50;
+const SAMPLES_PER_PIXEL: usize = 20;
 
 /// how many maximum bounce for rays before we give up and return black
 const MAX_DEPTH: usize = 40;
@@ -196,43 +196,40 @@ impl BackgroundWorker {
     /// It returns a channel with (x, y, color)
     /// If that computation is no longer relevant (camera or world changed for exampe)
     /// the receiver should be dropped and the threads will stop shortly after.
-    fn start(
-        &self,
-        world: Arc<World>,
-        camera: &Camera,
-    ) -> mpsc::Receiver<(usize, usize, egui::Color32)> {
-        let mut coords = (0..camera.image_height)
-            .into_iter()
-            .flat_map(|j| (0..camera.image_width).into_iter().map(move |i| (i, j)))
-            .collect::<Vec<_>>();
-
-        // shuffling the coords make the image appears in a more uniform manner
-        // which I prefer
-        coords.shuffle(&mut thread_rng());
+    fn start(&self, world: Arc<World>, camera: &Camera) -> mpsc::Receiver<(usize, usize, Color)> {
         let (sender, rx) = mpsc::channel();
 
-        let cam = Arc::new(camera.clone());
+        let camera = Arc::new(camera.clone());
         thread::spawn(move || {
-            // ignore the result since the only error we can get is because
+            let start = Instant::now();
+            let mut coords = (0..camera.image_height)
+                .into_iter()
+                .flat_map(|j| (0..camera.image_width).into_iter().map(move |i| (i, j)))
+                .cycle()
+                .take(camera.image_height * camera.image_width * SAMPLES_PER_PIXEL)
+                .collect::<Vec<_>>();
+
+            // shuffling the coords make the image appears in a more uniform manner
+            // which I prefer
+            coords.shuffle(&mut thread_rng());
+
+            let res = coords
+                .into_par_iter()
+                .try_for_each_with(sender, |sender, (i, j)| {
+                    let u = (i as f64 + random::<f64>()) / ((camera.image_width - 1) as f64);
+                    let v = (j as f64 + random::<f64>()) / ((camera.image_height - 1) as f64);
+                    let ray = camera.get_ray(u, v);
+                    sender.send((i, j, ray_color(&world, &ray, 0)))
+                });
+
+            // ignore the error since the only error we can get is because
             // the channel to send the result has been closed. In this case
             // this thread should just stop and die quietly, what it is
             // computing is no longer relevant (typically, window got resized)
-            let _ = coords
-                .into_par_iter()
-                .try_for_each_with(sender, |sender, (i, j)| {
-                    let mut color = Color::default();
-                    for _ in 0..SAMPLES_PER_PIXEL {
-                        let u = (i as f64 + random::<f64>()) / ((cam.image_width - 1) as f64);
-                        let v = (j as f64 + random::<f64>()) / ((cam.image_height - 1) as f64);
-                        let ray = cam.get_ray(u, v);
-                        color += ray_color(&world, &ray, 0);
-                    }
-
-                    let scale = 1.0 / SAMPLES_PER_PIXEL as f64;
-                    color = (color * scale).sqrt();
-                    let color: egui::Color32 = color.into();
-                    sender.send((i, j, color))
-                });
+            if let Ok(_) = res {
+                let dur = start.elapsed().as_millis();
+                println!("image took {}ms", dur);
+            }
         });
         rx
     }
@@ -247,11 +244,58 @@ enum AppState {
     Starting,
     Computing {
         camera: Camera,
-        pixels: Vec<egui::Color32>,
+        img_buffer: ImageBuffer,
         prev_size: egui::Vec2,
         prev_image: RetainedImage,
-        result_channel: mpsc::Receiver<(usize, usize, egui::Color32)>,
+        result_channel: mpsc::Receiver<(usize, usize, Color)>,
     },
+}
+
+struct ImageBuffer {
+    width: usize,
+    height: usize,
+    pixels: Vec<(Color, usize)>,
+}
+
+impl ImageBuffer {
+    fn new(width: usize, height: usize) -> Self {
+        let pixels = std::iter::repeat((Color::default(), 0))
+            .take(width * height)
+            .collect();
+        Self {
+            width,
+            height,
+            pixels,
+        }
+    }
+
+    fn update_at(&mut self, result: (usize, usize, Color)) {
+        let (x, y, col) = result;
+        // reverse the y axis because the internal image representation
+        // has its y axis pointing downward while our own axis is upward
+        let y = self.height - y - 1;
+        let idx = self.width * y + x;
+        let (c, n) = self.pixels[idx];
+        self.pixels[idx] = (c + col, n + 1);
+    }
+
+    fn to_retained_image(&self) -> RetainedImage {
+        let pixels = self
+            .pixels
+            .iter()
+            .map(|(col, n)| {
+                let scale = 1.0 / (*n as f64);
+                let color = (col * scale).sqrt();
+                let color: egui::Color32 = color.into();
+                color
+            })
+            .collect::<Vec<_>>();
+        let img = ColorImage {
+            size: [self.width, self.height],
+            pixels,
+        };
+        RetainedImage::from_color_image("", img)
+    }
 }
 
 fn gen_camera(size: &egui::Vec2) -> Camera {
@@ -288,15 +332,8 @@ impl MyApp {
         );
 
         let n = camera.image_width * camera.image_height;
-        let pixels: Vec<egui::Color32> = (0..n)
-            .into_iter()
-            .map(|_| egui::Color32::LIGHT_RED)
-            .collect();
-        let image = ColorImage {
-            size: [camera.image_width, camera.image_height],
-            pixels: pixels.clone(),
-        };
-        let image = RetainedImage::from_color_image("coucoustart", image);
+        let img_buffer = ImageBuffer::new(camera.image_width, camera.image_height);
+        let image = img_buffer.to_retained_image();
         image.show(ui);
 
         let bgw = BackgroundWorker {};
@@ -305,7 +342,7 @@ impl MyApp {
 
         self.state = AppState::Computing {
             camera,
-            pixels,
+            img_buffer,
             prev_size: size,
             prev_image: image,
             result_channel,
@@ -325,7 +362,7 @@ impl eframe::App for MyApp {
                     }
                     AppState::Computing {
                         camera,
-                        pixels,
+                        img_buffer,
                         prev_size,
                         prev_image,
                         result_channel,
@@ -342,46 +379,15 @@ impl eframe::App for MyApp {
                         // activity (in this case, `update` isn't called)
                         ctx.request_repaint_after(Duration::from_millis(32));
 
-                        for (x, y, color) in result_channel.try_iter() {
-                            // reverse the y axis because the internal image representation
-                            // has its y axis pointing downward while our own axis is upward
-                            let y = camera.image_height - y - 1;
-                            pixels[camera.image_width * y + x] = color;
+                        for result in result_channel.try_iter() {
+                            img_buffer.update_at(result)
                         }
-                        let image = ColorImage {
-                            size: [camera.image_width, camera.image_height],
-                            pixels: pixels.clone(),
-                        };
-                        let image = RetainedImage::from_color_image("", image);
+                        let image = img_buffer.to_retained_image();
                         *prev_image = image;
                         prev_image.show(ui);
                         ()
                     }
                 }
-
-                // let size = ui.available_size();
-                // if self.last_size == egui::Vec2::ZERO {
-                //     self.last_size = size;
-                // }
-
-                // if self.ctx.is_none() {
-                //     self.ctx = Some(ctx.clone());
-                // };
-
-                // let img = self.display.get_or_insert_with(|| {
-                //     let camera = gen_camera(&ui.available_size());
-                //     let img = gen_image(&self.world, &camera);
-                //     (camera, img)
-                // });
-
-                // if self.last_size != size {
-                //     let camera = gen_camera(&ui.available_size());
-                //     let i = gen_image(&self.world, &camera);
-                //     *img = (camera, i);
-                // };
-
-                // img.1.show(ui);
-                // self.last_size = size;
             });
     }
 }
