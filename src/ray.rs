@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::material::Material;
 use crate::vec3::{Point3, Vec3};
 
