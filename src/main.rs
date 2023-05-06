@@ -20,9 +20,8 @@ use camera::Camera;
 use ray::{HitRecord, Hittable, Ray};
 use vec3::{Color, Vec3};
 
-// put some globals for now
 /// how many ray per pixels (and its neighborhood)
-const SAMPLES_PER_PIXEL: usize = 20;
+const SAMPLES_PER_PIXEL: usize = 50;
 
 /// how many maximum bounce for rays before we give up and return black
 const MAX_DEPTH: usize = 40;
@@ -133,16 +132,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         material_right,
     ];
 
-    // let blue_red = vec![
-    //     Material::Lambertian {
-    //         albedo: Color::from([0.0, 0.0, 1.0]),
-    //     },
-    //     Material::Lambertian {
-    //         albedo: Color::from([1.0, 0.0, 0.0]),
-    //     },
-    // ];
-    // let r = (std::f64::consts::PI / 4.0).cos();
-
+    #[allow(unused_variables)]
     let world = World {
         spheres: vec![
             Sphere {
@@ -175,9 +165,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ],
     };
 
-    let world = Arc::new(World::new_random());
+    let world = World::new_random();
     let app = MyApp {
-        world: Arc::clone(&world),
+        world: Arc::new(world),
         state: AppState::Starting,
     };
 
@@ -188,7 +178,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-struct BackgroundWorker {}
+struct BackgroundWorker {
+    samples_per_pixel: usize,
+    max_depth: usize,
+}
 
 impl BackgroundWorker {
     /// given a world and a camera, initiate a background computation
@@ -199,37 +192,45 @@ impl BackgroundWorker {
     fn start(&self, world: Arc<World>, camera: &Camera) -> mpsc::Receiver<(usize, usize, Color)> {
         let (sender, rx) = mpsc::channel();
 
+        let samples_per_pixel = self.samples_per_pixel;
+        let max_depth = self.max_depth;
         let camera = Arc::new(camera.clone());
         thread::spawn(move || {
             let start = Instant::now();
             let mut coords = (0..camera.image_height)
                 .into_iter()
                 .flat_map(|j| (0..camera.image_width).into_iter().map(move |i| (i, j)))
-                .cycle()
-                .take(camera.image_height * camera.image_width * SAMPLES_PER_PIXEL)
                 .collect::<Vec<_>>();
 
             // shuffling the coords make the image appears in a more uniform manner
             // which I prefer
             coords.shuffle(&mut thread_rng());
 
-            let res = coords
-                .into_par_iter()
-                .try_for_each_with(sender, |sender, (i, j)| {
-                    let u = (i as f64 + random::<f64>()) / ((camera.image_width - 1) as f64);
-                    let v = (j as f64 + random::<f64>()) / ((camera.image_height - 1) as f64);
-                    let ray = camera.get_ray(u, v);
-                    sender.send((i, j, ray_color(&world, &ray, 0)))
-                });
+            for _ in 0..samples_per_pixel {
+                let sender = sender.clone();
+                let res = coords
+                    .par_iter()
+                    .try_for_each_with(sender, |sender, (i, j)| {
+                        let u = (*i as f64 + random::<f64>()) / ((camera.image_width - 1) as f64);
+                        let v = (*j as f64 + random::<f64>()) / ((camera.image_height - 1) as f64);
+                        let ray = camera.get_ray(u, v);
+                        sender.send((*i, *j, ray_color(&world, max_depth, &ray, 0)))
+                    });
 
-            // ignore the error since the only error we can get is because
-            // the channel to send the result has been closed. In this case
-            // this thread should just stop and die quietly, what it is
-            // computing is no longer relevant (typically, window got resized)
-            if let Ok(_) = res {
-                let dur = start.elapsed().as_millis();
-                println!("image took {}ms", dur);
+                // ignore the error since the only error we can get is because
+                // the channel to send the result has been closed. In this case
+                // this thread should just stop and die quietly, what it is
+                // computing is no longer relevant (typically, window got resized)
+                if res.is_err() {
+                    return;
+                }
             }
+
+            let dur = start.elapsed().as_millis();
+            println!(
+                "image took {}ms with {} samples per pixels with at most {} reflections",
+                dur, samples_per_pixel, max_depth
+            );
         });
         rx
     }
@@ -243,7 +244,6 @@ struct MyApp {
 enum AppState {
     Starting,
     Computing {
-        camera: Camera,
         img_buffer: ImageBuffer,
         prev_size: egui::Vec2,
         prev_image: RetainedImage,
@@ -306,8 +306,8 @@ fn gen_camera(size: &egui::Vec2) -> Camera {
     let look_at = Vec3::from([0, 0, 0]);
     let vup = Vec3::from([0, 1, 0]);
     let aperture = 0.1;
-    // let dist_to_focus = (look_from - look_at).length();
-    let dist_to_focus = 10.0;
+    let dist_to_focus = (look_from - look_at).length();
+    // let dist_to_focus = 10.0;
     Camera::new(
         look_from,
         look_at,
@@ -331,17 +331,28 @@ impl MyApp {
             size
         );
 
-        let n = camera.image_width * camera.image_height;
         let img_buffer = ImageBuffer::new(camera.image_width, camera.image_height);
         let image = img_buffer.to_retained_image();
         image.show(ui);
 
-        let bgw = BackgroundWorker {};
+        let spx = std::env::var("SAMPLES_PER_PIXEL")
+            .ok()
+            .and_then(|r| usize::from_str_radix(&r, 10).ok())
+            .unwrap_or(SAMPLES_PER_PIXEL);
+
+        let max_depth = std::env::var("MAX_DEPTH")
+            .ok()
+            .and_then(|r| usize::from_str_radix(&r, 10).ok())
+            .unwrap_or(MAX_DEPTH);
+
+        let bgw = BackgroundWorker {
+            samples_per_pixel: spx,
+            max_depth,
+        };
         let result_channel = bgw.start(Arc::clone(&self.world), &camera);
         ctx.request_repaint_after(Duration::from_millis(32));
 
         self.state = AppState::Computing {
-            camera,
             img_buffer,
             prev_size: size,
             prev_image: image,
@@ -361,7 +372,6 @@ impl eframe::App for MyApp {
                         self.start(ctx, &mut ui);
                     }
                     AppState::Computing {
-                        camera,
                         img_buffer,
                         prev_size,
                         prev_image,
@@ -370,7 +380,6 @@ impl eframe::App for MyApp {
                         let size = ui.available_size();
                         if &size != prev_size {
                             *prev_size = size;
-                            drop(result_channel); // shouldn't be needed
                             self.start(ctx, &mut ui);
                             return;
                         };
@@ -392,11 +401,11 @@ impl eframe::App for MyApp {
     }
 }
 
-fn ray_color<T>(world: &T, ray: &Ray, depth: usize) -> Color
+fn ray_color<T>(world: &T, max_depth: usize, ray: &Ray, depth: usize) -> Color
 where
     T: Hittable,
 {
-    if depth >= MAX_DEPTH {
+    if depth >= max_depth {
         return Color::default();
     }
 
@@ -415,7 +424,7 @@ where
 
             match hit.mat.scatter(ray, &hit) {
                 Some((scattered, attenuation)) => {
-                    attenuation * ray_color(world, &scattered, depth + 1)
+                    attenuation * ray_color(world, max_depth, &scattered, depth + 1)
                 }
                 None => Color::default(),
             }
